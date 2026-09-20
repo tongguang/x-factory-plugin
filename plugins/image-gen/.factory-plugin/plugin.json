@@ -1,0 +1,12 @@
+{
+  "name": "image-gen",
+  "description": "通过 OpenAI 兼容 Images API 生成和编辑图片，保存到当前项目并预览。",
+  "version": "0.5.1",
+  "repository": "https://github.com/tongguang/x-factory-plugin",
+  "homepage": "https://github.com/tongguang/x-factory-plugin/tree/main/plugins/image-gen",
+  "author": {
+    "name": "tongguang"
+  },
+  "license": "MIT",
+  "keywords": ["image", "generation", "editing", "skill"]
+}

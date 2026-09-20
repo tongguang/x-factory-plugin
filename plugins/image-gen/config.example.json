@@ -1,0 +1,6 @@
+{
+  "baseUrl": "https://your-api.example/v1",
+  "apiKey": "在本机填写真实密钥",
+  "model": "你的生图模型名称",
+  "timeoutMs": 180000
+}

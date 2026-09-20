@@ -1,0 +1,11 @@
+node_modules/
+.build/
+.cache/
+coverage/
+config.json
+.env
+.env.*
+!.env.example
+generated-images/
+*.log
+*.tgz
