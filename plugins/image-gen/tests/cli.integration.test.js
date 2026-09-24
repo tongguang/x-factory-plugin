@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
+import { inflateSync } from "node:zlib";
 import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -186,7 +187,7 @@ test("独立 bundle 在中文空格路径运行，两个项目分别使用自己
     assert.equal(call.url, "/v1/images/generations");
     assert.equal(call.method, "POST");
     assert.equal(call.headers.authorization, `Bearer ${TEST_KEY}`);
-    assert.deepEqual(JSON.parse(call.body), { model: "fake-image-model", prompt: COMPLEX_PROMPT, n: 1 });
+    assert.deepEqual(JSON.parse(call.body), { model: "fake-image-model", prompt: COMPLEX_PROMPT, n: 1, output_format: "png" });
   }
 });
 
@@ -198,8 +199,21 @@ test("显式输出目录、尺寸和多张请求被保留，图片文件互不�
   assert.equal(new Set(data.paths).size, 3);
   assert.equal(f.calls.length, 1);
   assert.deepEqual(JSON.parse(f.calls[0].body), {
-    model: "fake-image-model", prompt: "三只猫", n: 3, size: "1024x1024",
+    model: "fake-image-model", prompt: "三只猫", n: 3, size: "1024x1024", output_format: "png",
   });
+});
+
+test("文生图固定请求 PNG，仅 transparent 为 true 时请求透明背景，并原样保存半透明 RGBA", async (t) => {
+  const f = await fixture(t);
+  assert.equal(PNG[25], 6, "测试图片应为 RGBA PNG");
+  assert.equal(inflateSync(PNG.subarray(41, 54))[4], 127, "测试图片应包含半透明像素");
+  const outputDir = path.join(f.cwdA, "generated-images");
+  await success(await f.run("generate", { prompt: "透明图标", transparent: true }), outputDir, 1, "透明图标");
+  await success(await f.run("generate", { prompt: "普通图标", transparent: false }), outputDir, 1, "普通图标");
+  assert.deepEqual(f.calls.map((call) => JSON.parse(call.body)), [
+    { model: "fake-image-model", prompt: "透明图标", n: 1, background: "transparent", output_format: "png" },
+    { model: "fake-image-model", prompt: "普通图标", n: 1, output_format: "png" },
+  ]);
 });
 
 test("Base64 和 URL 图片按文件头保存四种格式，忽略错误或缺失的 MIME", async (t) => {
@@ -330,9 +344,29 @@ test("参考图通过 multipart 上传，保留复杂提示词且不修改原图
   assert.equal(form.get("model"), "fake-image-model");
   assert.equal(form.get("n"), "2");
   assert.equal(form.get("size"), "1024x1024");
+  assert.equal(form.has("background"), false);
+  assert.equal(form.get("output_format"), "png");
   assert.equal(form.get("image").name, path.basename(imagePath));
   assert.equal(form.get("image").type, "image/png");
   assert.deepEqual(Buffer.from(await form.get("image").arrayBuffer()), PNG);
+});
+
+test("参考图编辑固定请求 PNG，仅 transparent 为 true 时请求透明背景，并原样保存半透明 RGBA", async (t) => {
+  const f = await fixture(t);
+  const imagePath = path.join(f.cwdA, "参考图.png");
+  await writeFile(imagePath, PNG);
+  const outputDir = path.join(f.cwdA, "generated-images");
+  for (const [prompt, transparent] of [["透明编辑", true], ["普通编辑", false]]) {
+    await success(await f.run("edit", { prompt, imagePath, transparent }), outputDir, 1, prompt);
+  }
+  assert.equal(f.calls.length, 2);
+  const forms = await Promise.all(f.calls.map((call) => new Response(call.body, {
+    headers: { "content-type": call.headers["content-type"] },
+  }).formData()));
+  assert.equal(forms[0].get("background"), "transparent");
+  assert.equal(forms[0].get("output_format"), "png");
+  assert.equal(forms[1].has("background"), false);
+  assert.equal(forms[1].get("output_format"), "png");
 });
 
 test("返回少于请求张数时如实返回 requested 与 paths，并且不自动补发", async (t) => {
@@ -372,13 +406,19 @@ test("HTTP 请求超时后失败，不自动重试", async (t) => {
 test("非法 JSON、参数、参考图与 CLI 选项均在请求服务之前失败", async (t) => {
   const f = await fixture(t);
   const unsupportedImage = path.join(f.dir, "参考图.txt");
+  const validImage = path.join(f.dir, "参考图.png");
   await writeFile(unsupportedImage, PNG);
+  await writeFile(validImage, PNG);
   const invalid = [
     ["generate", "{ invalid JSON"],
     ["generate", null],
     ["generate", { prompt: "" }],
     ...[0, 5, 1.5, "2"].map((count) => ["generate", { prompt: "x", count }]),
     ["generate", { prompt: "x", size: 1024 }],
+    ...[null, 1, "true", [], {}].flatMap((transparent) => [
+      ["generate", { prompt: "x", transparent }],
+      ["edit", { prompt: "x", imagePath: validImage, transparent }],
+    ]),
     ["edit", { prompt: "x", imagePath: "relative.png" }],
     ["edit", { prompt: "x", imagePath: path.join(f.dir, "missing.png") }],
     ["edit", { prompt: "x", imagePath: unsupportedImage }],

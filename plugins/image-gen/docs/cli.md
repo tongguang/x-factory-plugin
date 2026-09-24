@@ -43,6 +43,17 @@ try {
 
 `prompt` 必填；`count` 默认为 1，必须为 1～4 的整数；`size` 可省略以使用服务默认值。编辑的 `imagePath` 必须是存在的绝对文件路径，支持 PNG、JPG、JPEG、WebP，文件非空且不超过 20 MiB。
 
+文生图和编辑请求都固定向服务发送 `output_format: "png"`，包括普通非透明请求。两种请求也都可选填 `"transparent": true`：仅设置为 `true` 时，额外发送 `background: "transparent"`；省略或设为 `false` 时不发送背景参数。`transparent` 必须是布尔值。输出格式固定请求 PNG，不提供 WebP 选项。兼容服务或旧模型若不支持这些参数，插件保留服务返回的错误。示例：
+
+```json
+{
+  "prompt": "画一个透明背景的图标",
+  "transparent": true
+}
+```
+
+编辑时同样在请求 JSON 中加入 `"transparent": true`，并保留必填的 `imagePath`。
+
 `--input` 必填。省略 `--output-dir` 时，图片保存到当前工作目录下的 `generated-images/`；Skill 会显式指定当前项目的绝对输出目录。提示词通过 JSON 文件传递，避免引号、换行及 shell 特殊字符改变请求。
 
 成功时，标准输出仅包含 JSON：
@@ -86,6 +97,8 @@ try {
 | 参考图编辑 | `/images/edits` | multipart |
 
 每次通过 `n` 指定张数，`size` 可选，响应支持 `data[].b64_json` 和 `data[].url`。服务必须支持所请求的数量和尺寸；实际返回不足时保存已有结果，不拆成多次请求或自动补发。
+
+文生图的 JSON 和编辑的 multipart 均发送 `output_format=png`；仅请求透明背景时再发送 `background=transparent`。插件直接保存服务返回的图片字节，不进行格式转换，以保留 PNG 中的 Alpha 通道。
 
 输出按文件头识别 PNG、JPEG、WebP、GIF，并选择对应扩展名，单张上限为 25 MiB。文件内容优先于下载响应的 `Content-Type`；HTML、普通文本及无法识别的内容会报错。这里只做轻量格式识别，不验证整张图片能否完整解码。
 

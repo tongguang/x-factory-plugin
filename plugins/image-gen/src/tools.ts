@@ -36,6 +36,7 @@ export const generateImageSchema = {
     .string()
     .optional()
     .describe("图片尺寸，例如 1024x1024。仅在你的服务支持时填写，留空使用服务默认"),
+  transparent: z.boolean().optional().describe("设为 true 时请求透明背景；省略或 false 不请求透明背景。输出始终为 PNG"),
 };
 
 export const editImageSchema = {
@@ -46,12 +47,14 @@ export const editImageSchema = {
     .describe("参考图的本地绝对路径"),
   count: z.number().int().min(1).max(4).default(1).describe("生成张数，1～4，默认 1"),
   size: z.string().optional().describe("图片尺寸，留空使用服务默认"),
+  transparent: z.boolean().optional().describe("设为 true 时请求透明背景；省略或 false 不请求透明背景。输出始终为 PNG"),
 };
 
 export type GenerateImageArgs = {
   prompt: string;
   count: number;
   size?: string;
+  transparent?: boolean;
 };
 
 export type EditImageArgs = {
@@ -59,6 +62,7 @@ export type EditImageArgs = {
   imagePath: string;
   count: number;
   size?: string;
+  transparent?: boolean;
 };
 
 export interface ToolResult {
@@ -140,6 +144,7 @@ export async function executeGenerateImage(
     prompt: args.prompt,
     count: args.count,
     size: args.size,
+    transparent: args.transparent,
   }));
 }
 
@@ -155,6 +160,7 @@ export async function executeEditImage(
     prompt: args.prompt,
     count: args.count,
     size: args.size,
+    transparent: args.transparent,
     image,
   }));
 }

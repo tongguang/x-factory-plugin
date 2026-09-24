@@ -26,6 +26,7 @@ description: 生成或编辑图片。当用户要求生成图片、画图、文�
 2. `count` 默认为 1；用户明确要求多张时使用 1～4。只执行一次 CLI，通过 Images API 的 `n` 请求指定张数。不要拆分请求、循环调用 CLI 或自动补发。用户一次要求超过 4 张时，先说明单次上限并确认数量。
 3. `size` 只在用户明确要求时填写，例如 `"1024x1024"`；否则省略。具体尺寸是否支持取决于用户配置的服务。
 4. `edit` 额外传入 `imagePath`，必须是存在的本地绝对路径，格式限 PNG / JPG / JPEG / WebP，文件非空且不超过 20 MiB。
+5. 仅当用户明确要求透明背景、Alpha 通道或透明去背时，设置 `"transparent": true`；其他情况省略。生成和编辑都支持此参数。CLI 对所有请求固定发送 `output_format=png`，仅透明请求额外发送 `background=transparent`，并保留服务返回的原始图片字节。
 
 ## 执行
 
@@ -57,6 +58,7 @@ node "${DROID_PLUGIN_ROOT}/dist/image-gen.cjs" edit --input "<本次临时请求
 
 - 默认配置位于 `~/.factory/plugin-config/image-gen/config.json`；`IMAGE_GEN_CONFIG` 具有最高优先级，可指定其他路径。配置缺失时 CLI 会创建空模板并提示填写。
 - 插件只使用 Images API：文生图请求 `/images/generations`，参考图编辑请求 `/images/edits`。路径追加到配置中的 `baseUrl`，不自动添加 `/v1`。
+- 兼容服务或旧模型可能不支持 `output_format=png` 或 `background=transparent`；若服务报错，如实说明，不自动更换服务或模型。
 - 不主动读取或展示配置文件内容，不输出密钥，也不猜测服务地址、密钥或模型名。配置问题引导用户填写 `baseUrl`、`apiKey`、`model`，不要自行更改用户的服务或模型选择。
 - 编辑会将参考图上传到用户配置的图片服务。输出保存为新文件，不覆盖参考图。
 - 输出按文件头识别 PNG、JPEG、WebP、GIF，单张上限 25 MiB；格式识别优先于下载响应的 `Content-Type`。无法识别的内容会报错，不把 HTML 或文本当作图片展示。轻量格式识别不代表完整解码验证。

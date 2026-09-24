@@ -15,7 +15,7 @@ const HELP = `Factory 图片生成与编辑
 
 用法：node image-gen.cjs <generate|edit> --input <请求.json> [--output-dir <目录>]
 
-请求：prompt（必填）、count（1～4，默认 1）、size（可选）。
+请求：prompt（必填）、count（1～4，默认 1）、size（可选）、transparent（可选布尔值，true 请求透明背景）。输出固定请求 PNG。
 edit 还需要 imagePath（参考图绝对路径）。
 输出目录默认为当前工作目录下的 generated-images。
 成功输出 JSON，失败向 stderr 输出错误并以非零状态退出。

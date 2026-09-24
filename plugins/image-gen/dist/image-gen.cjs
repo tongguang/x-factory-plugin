@@ -4283,7 +4283,9 @@ async function requestGeneration(config, params) {
     model: config.model,
     prompt: params.prompt,
     n: params.count,
-    ...params.size ? { size: params.size } : {}
+    ...params.size ? { size: params.size } : {},
+    output_format: "png",
+    ...params.transparent ? { background: "transparent" } : {}
   });
 }
 async function requestEdit(config, params) {
@@ -4293,6 +4295,8 @@ async function requestEdit(config, params) {
   form.append("prompt", params.prompt);
   form.append("n", String(params.count));
   if (params.size) form.append("size", params.size);
+  form.append("output_format", "png");
+  if (params.transparent) form.append("background", "transparent");
   return post(config, "/images/edits", form);
 }
 
@@ -4310,13 +4314,15 @@ var REFERENCE_MIME = {
 var generateImageSchema = {
   prompt: external_exports.string().min(1).describe("\u751F\u56FE\u63D0\u793A\u8BCD"),
   count: external_exports.number().int().min(1).max(4).default(1).describe("\u751F\u6210\u5F20\u6570\uFF0C1\uFF5E4\uFF0C\u9ED8\u8BA4 1\uFF0C\u901A\u8FC7 Images API \u7684 n \u53C2\u6570\u4E00\u6B21\u8BF7\u6C42"),
-  size: external_exports.string().optional().describe("\u56FE\u7247\u5C3A\u5BF8\uFF0C\u4F8B\u5982 1024x1024\u3002\u4EC5\u5728\u4F60\u7684\u670D\u52A1\u652F\u6301\u65F6\u586B\u5199\uFF0C\u7559\u7A7A\u4F7F\u7528\u670D\u52A1\u9ED8\u8BA4")
+  size: external_exports.string().optional().describe("\u56FE\u7247\u5C3A\u5BF8\uFF0C\u4F8B\u5982 1024x1024\u3002\u4EC5\u5728\u4F60\u7684\u670D\u52A1\u652F\u6301\u65F6\u586B\u5199\uFF0C\u7559\u7A7A\u4F7F\u7528\u670D\u52A1\u9ED8\u8BA4"),
+  transparent: external_exports.boolean().optional().describe("\u8BBE\u4E3A true \u65F6\u8BF7\u6C42\u900F\u660E\u80CC\u666F\uFF1B\u7701\u7565\u6216 false \u4E0D\u8BF7\u6C42\u900F\u660E\u80CC\u666F\u3002\u8F93\u51FA\u59CB\u7EC8\u4E3A PNG")
 };
 var editImageSchema = {
   prompt: external_exports.string().min(1).describe("\u4FEE\u6539\u8981\u6C42\uFF0C\u4F8B\u5982\uFF1A\u628A\u80CC\u666F\u6362\u6210\u767D\u8272\uFF0C\u4FDD\u7559\u4E3B\u4F53"),
   imagePath: external_exports.string().min(1).describe("\u53C2\u8003\u56FE\u7684\u672C\u5730\u7EDD\u5BF9\u8DEF\u5F84"),
   count: external_exports.number().int().min(1).max(4).default(1).describe("\u751F\u6210\u5F20\u6570\uFF0C1\uFF5E4\uFF0C\u9ED8\u8BA4 1"),
-  size: external_exports.string().optional().describe("\u56FE\u7247\u5C3A\u5BF8\uFF0C\u7559\u7A7A\u4F7F\u7528\u670D\u52A1\u9ED8\u8BA4")
+  size: external_exports.string().optional().describe("\u56FE\u7247\u5C3A\u5BF8\uFF0C\u7559\u7A7A\u4F7F\u7528\u670D\u52A1\u9ED8\u8BA4"),
+  transparent: external_exports.boolean().optional().describe("\u8BBE\u4E3A true \u65F6\u8BF7\u6C42\u900F\u660E\u80CC\u666F\uFF1B\u7701\u7565\u6216 false \u4E0D\u8BF7\u6C42\u900F\u660E\u80CC\u666F\u3002\u8F93\u51FA\u59CB\u7EC8\u4E3A PNG")
 };
 var InputError = class extends Error {
 };
@@ -4374,7 +4380,8 @@ async function executeGenerateImage(args, config, outputDir = defaultOutputDir()
   return executeImages(args, cfg, outputDir, () => requestGeneration(cfg, {
     prompt: args.prompt,
     count: args.count,
-    size: args.size
+    size: args.size,
+    transparent: args.transparent
   }));
 }
 async function executeEditImage(args, config, outputDir = defaultOutputDir()) {
@@ -4384,6 +4391,7 @@ async function executeEditImage(args, config, outputDir = defaultOutputDir()) {
     prompt: args.prompt,
     count: args.count,
     size: args.size,
+    transparent: args.transparent,
     image
   }));
 }
@@ -4393,7 +4401,7 @@ var HELP = `Factory \u56FE\u7247\u751F\u6210\u4E0E\u7F16\u8F91
 
 \u7528\u6CD5\uFF1Anode image-gen.cjs <generate|edit> --input <\u8BF7\u6C42.json> [--output-dir <\u76EE\u5F55>]
 
-\u8BF7\u6C42\uFF1Aprompt\uFF08\u5FC5\u586B\uFF09\u3001count\uFF081\uFF5E4\uFF0C\u9ED8\u8BA4 1\uFF09\u3001size\uFF08\u53EF\u9009\uFF09\u3002
+\u8BF7\u6C42\uFF1Aprompt\uFF08\u5FC5\u586B\uFF09\u3001count\uFF081\uFF5E4\uFF0C\u9ED8\u8BA4 1\uFF09\u3001size\uFF08\u53EF\u9009\uFF09\u3001transparent\uFF08\u53EF\u9009\u5E03\u5C14\u503C\uFF0Ctrue \u8BF7\u6C42\u900F\u660E\u80CC\u666F\uFF09\u3002\u8F93\u51FA\u56FA\u5B9A\u8BF7\u6C42 PNG\u3002
 edit \u8FD8\u9700\u8981 imagePath\uFF08\u53C2\u8003\u56FE\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002
 \u8F93\u51FA\u76EE\u5F55\u9ED8\u8BA4\u4E3A\u5F53\u524D\u5DE5\u4F5C\u76EE\u5F55\u4E0B\u7684 generated-images\u3002
 \u6210\u529F\u8F93\u51FA JSON\uFF0C\u5931\u8D25\u5411 stderr \u8F93\u51FA\u9519\u8BEF\u5E76\u4EE5\u975E\u96F6\u72B6\u6001\u9000\u51FA\u3002

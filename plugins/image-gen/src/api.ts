@@ -82,6 +82,7 @@ export interface GenerateParams {
   prompt: string;
   count: number;
   size?: string;
+  transparent?: boolean;
 }
 
 export interface EditParams extends GenerateParams {
@@ -92,6 +93,8 @@ export async function requestGeneration(config: PluginConfig, params: GeneratePa
   return post(config, "/images/generations", {
     model: config.model, prompt: params.prompt, n: params.count,
     ...(params.size ? { size: params.size } : {}),
+    output_format: "png",
+    ...(params.transparent ? { background: "transparent" } : {}),
   });
 }
 
@@ -102,5 +105,7 @@ export async function requestEdit(config: PluginConfig, params: EditParams): Pro
   form.append("prompt", params.prompt);
   form.append("n", String(params.count));
   if (params.size) form.append("size", params.size);
+  form.append("output_format", "png");
+  if (params.transparent) form.append("background", "transparent");
   return post(config, "/images/edits", form);
 }
