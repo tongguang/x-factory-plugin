@@ -3,13 +3,13 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 /** 单张图片下载、解码及保存的大小上限（字节）。 */
-export const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+export const MAX_IMAGE_BYTES = 64 * 1024 * 1024;
 const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 export class SaveError extends Error {}
 
 function checkSize(bytes: number): void {
-  if (bytes > MAX_IMAGE_BYTES) throw new SaveError("图片超过 25 MiB 上限，已停止处理。");
+  if (bytes > MAX_IMAGE_BYTES) throw new SaveError("图片超过 64 MiB 上限，已停止处理。");
 }
 
 /** 仅识别文件头，不进行完整图片解码。 */

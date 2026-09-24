@@ -41,9 +41,11 @@ try {
 }
 ```
 
-`prompt` 必填；`count` 默认为 1，必须为 1～4 的整数；`size` 可省略以使用服务默认值。编辑的 `imagePath` 必须是存在的绝对文件路径，支持 PNG、JPG、JPEG、WebP，文件非空且不超过 20 MiB。
+`prompt` 必填；`count` 默认为 1，必须为 1～4 的整数。`size` 可省略，也可为 `"auto"` 或 `"宽x高"`。自定义宽高均须为 16 的倍数且不超过 3840，长短边比例不超过 3:1，总像素须在 655,360～8,294,400 之间；不符合规则的值会在发送请求前被拒绝。常用尺寸包括 `1024x1024`、`1536x1024`、`2048x1152`、`3840x2160`；超过 3,686,400 像素（2560×1440）的自定义尺寸属实验性。[OpenAI 尺寸说明](https://developers.openai.com/api/docs/guides/image-generation)
 
-文生图和编辑请求都固定向服务发送 `output_format: "png"`，包括普通非透明请求。两种请求也都可选填 `"transparent": true`：仅设置为 `true` 时，额外发送 `background: "transparent"`；省略或设为 `false` 时不发送背景参数。`transparent` 必须是布尔值。输出格式固定请求 PNG，不提供 WebP 选项。兼容服务或旧模型若不支持这些参数，插件保留服务返回的错误。示例：
+编辑的 `imagePath` 必须是存在的绝对文件路径，支持 PNG、JPG、JPEG、WebP，文件非空且严格小于 50,000,000 字节；当前每次只能编辑一张图片。[OpenAI 编辑接口说明](https://developers.openai.com/api/reference/cli/resources/images/methods/edit)
+
+文生图和编辑请求都固定向服务发送 `output_format: "png"`，包括普通非透明请求。两种请求也都可选填 `"transparent": true`：仅设置为 `true` 时，额外发送 `background: "transparent"`；省略或设为 `false` 时不发送背景参数。`transparent` 必须是布尔值。输出格式固定请求 PNG，不提供 WebP 选项。透明请求使用 PNG 的真实 Alpha 通道，不应让模型绘制棋盘格来模拟透明。自定义服务若不支持相关参数，插件保留其原始错误。示例：
 
 ```json
 {
@@ -89,7 +91,7 @@ try {
 
 ## 服务协议
 
-插件只使用 OpenAI 兼容 Images API：
+插件仅接受 `gpt-image-2.5-flare`、`gpt-image-2.5-sunburst`、`gpt-image-2.5-flare-2026-09-08`、`gpt-image-2.5-sunburst-2026-09-08`；配置中的其他模型会在发送请求前被拒绝。可保留自定义 `baseUrl`，但该地址须实现相应的 OpenAI Images API 语义。插件使用两个端点：
 
 | 操作 | 追加到 `baseUrl` 的路径 | 请求格式 |
 | --- | --- | --- |
@@ -100,7 +102,7 @@ try {
 
 文生图的 JSON 和编辑的 multipart 均发送 `output_format=png`；仅请求透明背景时再发送 `background=transparent`。插件直接保存服务返回的图片字节，不进行格式转换，以保留 PNG 中的 Alpha 通道。
 
-输出按文件头识别 PNG、JPEG、WebP、GIF，并选择对应扩展名，单张上限为 25 MiB。文件内容优先于下载响应的 `Content-Type`；HTML、普通文本及无法识别的内容会报错。这里只做轻量格式识别，不验证整张图片能否完整解码。
+输出按文件头识别 PNG、JPEG、WebP、GIF，并选择对应扩展名，单张本地上限为 64 MiB。这是插件限制，不是 OpenAI 公布的输出限制。文件内容优先于下载响应的 `Content-Type`；HTML、普通文本及无法识别的内容会报错。这里只做轻量格式识别，不验证整张图片能否完整解码。
 
 ## 开发与验证
 

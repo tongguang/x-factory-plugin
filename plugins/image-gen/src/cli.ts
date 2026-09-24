@@ -15,8 +15,10 @@ const HELP = `Factory 图片生成与编辑
 
 用法：node image-gen.cjs <generate|edit> --input <请求.json> [--output-dir <目录>]
 
-请求：prompt（必填）、count（1～4，默认 1）、size（可选）、transparent（可选布尔值，true 请求透明背景）。输出固定请求 PNG。
-edit 还需要 imagePath（参考图绝对路径）。
+请求：prompt（必填）、count（1～4，默认 1）、size（可选 auto 或符合 GPT Image 2.5 规则的宽x高）、transparent（可选布尔值，true 请求原生透明背景）。输出固定请求 PNG。
+自定义尺寸：宽高均为 16 的倍数、单边不超过 3840、长短边比例不超过 3:1、总像素为 655,360～8,294,400。
+edit 还需要 imagePath（一张参考图的绝对路径，文件非空且小于 50,000,000 字节）。
+模型仅支持 GPT Image 2.5 Flare / Sunburst 的别名和 2026-09-08 快照；单张输出的本地上限为 64 MiB。
 输出目录默认为当前工作目录下的 generated-images。
 成功输出 JSON，失败向 stderr 输出错误并以非零状态退出。
 部分失败时 stdout 仍输出已保存路径和 error；不要自动重发。

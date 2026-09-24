@@ -13,6 +13,12 @@ export interface PluginConfig {
 }
 
 const DEFAULT_TIMEOUT_MS = 180000;
+const SUPPORTED_MODELS = new Set([
+  "gpt-image-2.5-flare",
+  "gpt-image-2.5-flare-2026-09-08",
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-sunburst-2026-09-08",
+]);
 
 export function configPath(): string {
   // 用户配置独立于插件安装目录，更新插件不会覆盖配置。
@@ -84,6 +90,9 @@ export async function loadConfig(file: string = configPath()): Promise<PluginCon
   }
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new ConfigError("baseUrl 仅支持 http/https。");
+  }
+  if (!SUPPORTED_MODELS.has(model)) {
+    throw new ConfigError("model 仅支持 GPT Image 2.5 Flare / Sunburst 的别名及 2026-09-08 快照名。");
   }
 
   return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey, model, timeoutMs };

@@ -15,13 +15,29 @@ export function defaultOutputDir(): string {
   return path.resolve("generated-images");
 }
 
-const MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
+const MAX_REFERENCE_BYTES = 50_000_000;
 const REFERENCE_MIME: Record<string, string> = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
 };
+
+function validSize(size: string): boolean {
+  if (size === "auto") return true;
+  const match = /^([1-9]\d*)x([1-9]\d*)$/.exec(size);
+  if (!match) return false;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width <= 3840 && height <= 3840
+    && width % 16 === 0 && height % 16 === 0
+    && Math.max(width, height) <= 3 * Math.min(width, height)
+    && width * height >= 655_360 && width * height <= 8_294_400;
+}
+
+const imageSize = z.string().refine(validSize, {
+  message: "size 须为 auto 或符合 GPT Image 2.5 规则的 宽x高（边长为 16 的倍数、单边≤3840、长宽比≤3:1、总像素 655360～8294400）",
+}).optional();
 
 export const generateImageSchema = {
   prompt: z.string().min(1).describe("生图提示词"),
@@ -32,10 +48,7 @@ export const generateImageSchema = {
     .max(4)
     .default(1)
     .describe("生成张数，1～4，默认 1，通过 Images API 的 n 参数一次请求"),
-  size: z
-    .string()
-    .optional()
-    .describe("图片尺寸，例如 1024x1024。仅在你的服务支持时填写，留空使用服务默认"),
+  size: imageSize.describe("图片尺寸：auto 或符合 GPT Image 2.5 规则的 宽x高；留空使用模型默认"),
   transparent: z.boolean().optional().describe("设为 true 时请求透明背景；省略或 false 不请求透明背景。输出始终为 PNG"),
 };
 
@@ -46,7 +59,7 @@ export const editImageSchema = {
     .min(1)
     .describe("参考图的本地绝对路径"),
   count: z.number().int().min(1).max(4).default(1).describe("生成张数，1～4，默认 1"),
-  size: z.string().optional().describe("图片尺寸，留空使用服务默认"),
+  size: imageSize.describe("图片尺寸：auto 或符合 GPT Image 2.5 规则的 宽x高；留空使用模型默认"),
   transparent: z.boolean().optional().describe("设为 true 时请求透明背景；省略或 false 不请求透明背景。输出始终为 PNG"),
 };
 
@@ -126,8 +139,8 @@ async function readReferenceImage(imagePath: string): Promise<{
   }
   if (!info.isFile()) throw new InputError(`参考图不是文件：${imagePath}`);
   if (info.size === 0) throw new InputError(`参考图内容为空：${imagePath}`);
-  if (info.size > MAX_REFERENCE_BYTES) {
-    throw new InputError(`参考图超过 20MB 上限：${imagePath}`);
+  if (info.size >= MAX_REFERENCE_BYTES) {
+    throw new InputError(`参考图必须小于 50 MB（50,000,000 字节）：${imagePath}`);
   }
   const buffer = await readFile(imagePath);
   return { buffer, filename: path.basename(imagePath), mime };

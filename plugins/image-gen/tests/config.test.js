@@ -17,7 +17,7 @@ async function tmpDir(t) {
 const VALID = {
   baseUrl: "https://api.example.com/v1",
   apiKey: "test-key-not-real",
-  model: "test-image-model",
+  model: "gpt-image-2.5-flare",
   timeoutMs: 5000,
 };
 
@@ -63,6 +63,29 @@ test("有效配置规范化字符串、使用默认超时并忽略未知字段",
     responsesModel: "old-main-model",
   }), "utf8");
   assert.deepEqual(await loadConfig(file), { ...VALID, timeoutMs: 180000 });
+});
+
+test("仅接受 GPT Image 2.5 的 Flare、Sunburst 别名和官方快照", async (t) => {
+  const dir = await tmpDir(t);
+  const file = path.join(dir, "config.json");
+  for (const model of [
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare-2026-09-08",
+    "gpt-image-2.5-sunburst-2026-09-08",
+  ]) {
+    await writeFile(file, JSON.stringify({ ...VALID, model }), "utf8");
+    assert.equal((await loadConfig(file)).model, model);
+  }
+  for (const model of ["fake-image-model", "gpt-image-2", "gpt-image-2.5-flare-preview"]) {
+    await writeFile(file, JSON.stringify({ ...VALID, model }), "utf8");
+    await assert.rejects(loadConfig(file), (err) => {
+      assert.ok(err instanceof ConfigError);
+      assert.match(err.message, /model|GPT Image 2\.5/i);
+      assert.ok(!err.message.includes(VALID.apiKey), "错误消息不得包含密钥");
+      return true;
+    });
+  }
 });
 
 test("无效 JSON、配置结构和服务地址明确报错，不泄露密钥", async (t) => {

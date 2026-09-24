@@ -6,7 +6,7 @@
 
 | 插件 | 功能 |
 | --- | --- |
-| [image-gen](plugins/image-gen/README.md) | 根据文字生成图片，或编辑一张本地参考图；支持每次生成 1～4 张，结果保存到当前项目。 |
+| [image-gen](plugins/image-gen/README.md) | 使用 GPT Image 2.5 文生图或编辑一张本地图片，支持原生透明背景；每次生成 1～4 张，结果保存到当前项目。 |
 
 ## 安装
 

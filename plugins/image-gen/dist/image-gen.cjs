@@ -4082,6 +4082,12 @@ var import_node_fs = require("node:fs");
 var import_node_path = __toESM(require("node:path"), 1);
 var import_node_os = __toESM(require("node:os"), 1);
 var DEFAULT_TIMEOUT_MS = 18e4;
+var SUPPORTED_MODELS = /* @__PURE__ */ new Set([
+  "gpt-image-2.5-flare",
+  "gpt-image-2.5-flare-2026-09-08",
+  "gpt-image-2.5-sunburst",
+  "gpt-image-2.5-sunburst-2026-09-08"
+]);
 function configPath() {
   const override = process.env.IMAGE_GEN_CONFIG;
   if (override && override.trim()) return import_node_path.default.resolve(override.trim());
@@ -4138,6 +4144,9 @@ async function loadConfig(file = configPath()) {
   if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
     throw new ConfigError("baseUrl \u4EC5\u652F\u6301 http/https\u3002");
   }
+  if (!SUPPORTED_MODELS.has(model)) {
+    throw new ConfigError("model \u4EC5\u652F\u6301 GPT Image 2.5 Flare / Sunburst \u7684\u522B\u540D\u53CA 2026-09-08 \u5FEB\u7167\u540D\u3002");
+  }
   return { baseUrl: baseUrl.replace(/\/+$/, ""), apiKey, model, timeoutMs };
 }
 
@@ -4145,12 +4154,12 @@ async function loadConfig(file = configPath()) {
 var import_promises2 = require("node:fs/promises");
 var import_node_path2 = __toESM(require("node:path"), 1);
 var import_node_crypto = require("node:crypto");
-var MAX_IMAGE_BYTES = 25 * 1024 * 1024;
+var MAX_IMAGE_BYTES = 64 * 1024 * 1024;
 var PNG_SIGNATURE = Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]);
 var SaveError = class extends Error {
 };
 function checkSize(bytes) {
-  if (bytes > MAX_IMAGE_BYTES) throw new SaveError("\u56FE\u7247\u8D85\u8FC7 25 MiB \u4E0A\u9650\uFF0C\u5DF2\u505C\u6B62\u5904\u7406\u3002");
+  if (bytes > MAX_IMAGE_BYTES) throw new SaveError("\u56FE\u7247\u8D85\u8FC7 64 MiB \u4E0A\u9650\uFF0C\u5DF2\u505C\u6B62\u5904\u7406\u3002");
 }
 function imageExtension(buf) {
   if (buf.subarray(0, 8).equals(PNG_SIGNATURE)) return ".png";
@@ -4304,24 +4313,35 @@ async function requestEdit(config, params) {
 function defaultOutputDir() {
   return import_node_path3.default.resolve("generated-images");
 }
-var MAX_REFERENCE_BYTES = 20 * 1024 * 1024;
+var MAX_REFERENCE_BYTES = 5e7;
 var REFERENCE_MIME = {
   ".png": "image/png",
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp"
 };
+function validSize(size) {
+  if (size === "auto") return true;
+  const match = /^([1-9]\d*)x([1-9]\d*)$/.exec(size);
+  if (!match) return false;
+  const width = Number(match[1]);
+  const height = Number(match[2]);
+  return width <= 3840 && height <= 3840 && width % 16 === 0 && height % 16 === 0 && Math.max(width, height) <= 3 * Math.min(width, height) && width * height >= 655360 && width * height <= 8294400;
+}
+var imageSize = external_exports.string().refine(validSize, {
+  message: "size \u987B\u4E3A auto \u6216\u7B26\u5408 GPT Image 2.5 \u89C4\u5219\u7684 \u5BBDx\u9AD8\uFF08\u8FB9\u957F\u4E3A 16 \u7684\u500D\u6570\u3001\u5355\u8FB9\u22643840\u3001\u957F\u5BBD\u6BD4\u22643:1\u3001\u603B\u50CF\u7D20 655360\uFF5E8294400\uFF09"
+}).optional();
 var generateImageSchema = {
   prompt: external_exports.string().min(1).describe("\u751F\u56FE\u63D0\u793A\u8BCD"),
   count: external_exports.number().int().min(1).max(4).default(1).describe("\u751F\u6210\u5F20\u6570\uFF0C1\uFF5E4\uFF0C\u9ED8\u8BA4 1\uFF0C\u901A\u8FC7 Images API \u7684 n \u53C2\u6570\u4E00\u6B21\u8BF7\u6C42"),
-  size: external_exports.string().optional().describe("\u56FE\u7247\u5C3A\u5BF8\uFF0C\u4F8B\u5982 1024x1024\u3002\u4EC5\u5728\u4F60\u7684\u670D\u52A1\u652F\u6301\u65F6\u586B\u5199\uFF0C\u7559\u7A7A\u4F7F\u7528\u670D\u52A1\u9ED8\u8BA4"),
+  size: imageSize.describe("\u56FE\u7247\u5C3A\u5BF8\uFF1Aauto \u6216\u7B26\u5408 GPT Image 2.5 \u89C4\u5219\u7684 \u5BBDx\u9AD8\uFF1B\u7559\u7A7A\u4F7F\u7528\u6A21\u578B\u9ED8\u8BA4"),
   transparent: external_exports.boolean().optional().describe("\u8BBE\u4E3A true \u65F6\u8BF7\u6C42\u900F\u660E\u80CC\u666F\uFF1B\u7701\u7565\u6216 false \u4E0D\u8BF7\u6C42\u900F\u660E\u80CC\u666F\u3002\u8F93\u51FA\u59CB\u7EC8\u4E3A PNG")
 };
 var editImageSchema = {
   prompt: external_exports.string().min(1).describe("\u4FEE\u6539\u8981\u6C42\uFF0C\u4F8B\u5982\uFF1A\u628A\u80CC\u666F\u6362\u6210\u767D\u8272\uFF0C\u4FDD\u7559\u4E3B\u4F53"),
   imagePath: external_exports.string().min(1).describe("\u53C2\u8003\u56FE\u7684\u672C\u5730\u7EDD\u5BF9\u8DEF\u5F84"),
   count: external_exports.number().int().min(1).max(4).default(1).describe("\u751F\u6210\u5F20\u6570\uFF0C1\uFF5E4\uFF0C\u9ED8\u8BA4 1"),
-  size: external_exports.string().optional().describe("\u56FE\u7247\u5C3A\u5BF8\uFF0C\u7559\u7A7A\u4F7F\u7528\u670D\u52A1\u9ED8\u8BA4"),
+  size: imageSize.describe("\u56FE\u7247\u5C3A\u5BF8\uFF1Aauto \u6216\u7B26\u5408 GPT Image 2.5 \u89C4\u5219\u7684 \u5BBDx\u9AD8\uFF1B\u7559\u7A7A\u4F7F\u7528\u6A21\u578B\u9ED8\u8BA4"),
   transparent: external_exports.boolean().optional().describe("\u8BBE\u4E3A true \u65F6\u8BF7\u6C42\u900F\u660E\u80CC\u666F\uFF1B\u7701\u7565\u6216 false \u4E0D\u8BF7\u6C42\u900F\u660E\u80CC\u666F\u3002\u8F93\u51FA\u59CB\u7EC8\u4E3A PNG")
 };
 var InputError = class extends Error {
@@ -4369,8 +4389,8 @@ async function readReferenceImage(imagePath) {
   }
   if (!info.isFile()) throw new InputError(`\u53C2\u8003\u56FE\u4E0D\u662F\u6587\u4EF6\uFF1A${imagePath}`);
   if (info.size === 0) throw new InputError(`\u53C2\u8003\u56FE\u5185\u5BB9\u4E3A\u7A7A\uFF1A${imagePath}`);
-  if (info.size > MAX_REFERENCE_BYTES) {
-    throw new InputError(`\u53C2\u8003\u56FE\u8D85\u8FC7 20MB \u4E0A\u9650\uFF1A${imagePath}`);
+  if (info.size >= MAX_REFERENCE_BYTES) {
+    throw new InputError(`\u53C2\u8003\u56FE\u5FC5\u987B\u5C0F\u4E8E 50 MB\uFF0850,000,000 \u5B57\u8282\uFF09\uFF1A${imagePath}`);
   }
   const buffer = await (0, import_promises3.readFile)(imagePath);
   return { buffer, filename: import_node_path3.default.basename(imagePath), mime };
@@ -4401,8 +4421,10 @@ var HELP = `Factory \u56FE\u7247\u751F\u6210\u4E0E\u7F16\u8F91
 
 \u7528\u6CD5\uFF1Anode image-gen.cjs <generate|edit> --input <\u8BF7\u6C42.json> [--output-dir <\u76EE\u5F55>]
 
-\u8BF7\u6C42\uFF1Aprompt\uFF08\u5FC5\u586B\uFF09\u3001count\uFF081\uFF5E4\uFF0C\u9ED8\u8BA4 1\uFF09\u3001size\uFF08\u53EF\u9009\uFF09\u3001transparent\uFF08\u53EF\u9009\u5E03\u5C14\u503C\uFF0Ctrue \u8BF7\u6C42\u900F\u660E\u80CC\u666F\uFF09\u3002\u8F93\u51FA\u56FA\u5B9A\u8BF7\u6C42 PNG\u3002
-edit \u8FD8\u9700\u8981 imagePath\uFF08\u53C2\u8003\u56FE\u7EDD\u5BF9\u8DEF\u5F84\uFF09\u3002
+\u8BF7\u6C42\uFF1Aprompt\uFF08\u5FC5\u586B\uFF09\u3001count\uFF081\uFF5E4\uFF0C\u9ED8\u8BA4 1\uFF09\u3001size\uFF08\u53EF\u9009 auto \u6216\u7B26\u5408 GPT Image 2.5 \u89C4\u5219\u7684\u5BBDx\u9AD8\uFF09\u3001transparent\uFF08\u53EF\u9009\u5E03\u5C14\u503C\uFF0Ctrue \u8BF7\u6C42\u539F\u751F\u900F\u660E\u80CC\u666F\uFF09\u3002\u8F93\u51FA\u56FA\u5B9A\u8BF7\u6C42 PNG\u3002
+\u81EA\u5B9A\u4E49\u5C3A\u5BF8\uFF1A\u5BBD\u9AD8\u5747\u4E3A 16 \u7684\u500D\u6570\u3001\u5355\u8FB9\u4E0D\u8D85\u8FC7 3840\u3001\u957F\u77ED\u8FB9\u6BD4\u4F8B\u4E0D\u8D85\u8FC7 3:1\u3001\u603B\u50CF\u7D20\u4E3A 655,360\uFF5E8,294,400\u3002
+edit \u8FD8\u9700\u8981 imagePath\uFF08\u4E00\u5F20\u53C2\u8003\u56FE\u7684\u7EDD\u5BF9\u8DEF\u5F84\uFF0C\u6587\u4EF6\u975E\u7A7A\u4E14\u5C0F\u4E8E 50,000,000 \u5B57\u8282\uFF09\u3002
+\u6A21\u578B\u4EC5\u652F\u6301 GPT Image 2.5 Flare / Sunburst \u7684\u522B\u540D\u548C 2026-09-08 \u5FEB\u7167\uFF1B\u5355\u5F20\u8F93\u51FA\u7684\u672C\u5730\u4E0A\u9650\u4E3A 64 MiB\u3002
 \u8F93\u51FA\u76EE\u5F55\u9ED8\u8BA4\u4E3A\u5F53\u524D\u5DE5\u4F5C\u76EE\u5F55\u4E0B\u7684 generated-images\u3002
 \u6210\u529F\u8F93\u51FA JSON\uFF0C\u5931\u8D25\u5411 stderr \u8F93\u51FA\u9519\u8BEF\u5E76\u4EE5\u975E\u96F6\u72B6\u6001\u9000\u51FA\u3002
 \u90E8\u5206\u5931\u8D25\u65F6 stdout \u4ECD\u8F93\u51FA\u5DF2\u4FDD\u5B58\u8DEF\u5F84\u548C error\uFF1B\u4E0D\u8981\u81EA\u52A8\u91CD\u53D1\u3002

@@ -4,10 +4,11 @@ import { spawn } from "node:child_process";
 import { createServer } from "node:http";
 import { Readable } from "node:stream";
 import { inflateSync } from "node:zlib";
-import { copyFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, open, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { MAX_IMAGE_BYTES, saveBase64Image } from "../.build/save.js";
 
 const BUNDLE = process.env.IMAGE_GEN_TEST_BUNDLE
   ? path.resolve(process.env.IMAGE_GEN_TEST_BUNDLE)
@@ -27,6 +28,7 @@ const IMAGE_SAMPLES = [
   { name: "GIF89a", extension: ".gif", b64: "R0lGODlhAQABAIEAAAAAAAAAAAAAAAAAACH5BAEAAAAALAAAAAABAAEAAAgEAAEEBAA7", contentType: "image/gif" },
 ].map((sample) => ({ ...sample, bytes: Buffer.from(sample.b64, "base64") }));
 const TEST_KEY = "image-gen-integration-not-a-real-key";
+const TEST_MODEL = "gpt-image-2.5-flare";
 const COMPLEX_PROMPT = '中文提示词，包含 "引号"、反斜线 \\、`反引号` 和 $(不应执行)\n第二行：保留全部细节 🎨';
 
 function json(body, status = 200) {
@@ -76,16 +78,16 @@ async function fixture(t, handler = oneImage, timeoutMs = 5000) {
   origin = `http://127.0.0.1:${server.address().port}`;
   const config = path.join(dir, "隔离配置.json");
   await writeFile(config, JSON.stringify({
-    baseUrl: `${origin}/v1`, apiKey: TEST_KEY, model: "fake-image-model", timeoutMs,
+    baseUrl: `${origin}/v1`, apiKey: TEST_KEY, model: TEST_MODEL, timeoutMs,
   }));
 
-  function invoke(args, cwd = cwdA, env = {}) {
+  function invoke(args, cwd = cwdA, env = {}, subprocessTimeoutMs = 15000) {
     return new Promise((resolve, reject) => {
       const child = spawn(process.execPath, [bundle, ...args], {
         cwd,
         env: { ...process.env, IMAGE_GEN_CONFIG: config, NODE_PATH: "", NODE_OPTIONS: "", ...env },
         windowsHide: true,
-        signal: AbortSignal.timeout(15000),
+        signal: AbortSignal.timeout(subprocessTimeoutMs),
       });
       let stdout = "";
       let stderr = "";
@@ -97,12 +99,12 @@ async function fixture(t, handler = oneImage, timeoutMs = 5000) {
   }
 
   let sequence = 0;
-  async function run(command, body, { cwd = cwdA, outputDir, env } = {}) {
+  async function run(command, body, { cwd = cwdA, outputDir, env, subprocessTimeoutMs } = {}) {
     const input = path.join(dir, `请求 ${++sequence}.json`);
     await writeFile(input, typeof body === "string" ? body : JSON.stringify(body), "utf8");
     const args = [command, "--input", input];
     if (outputDir) args.push("--output-dir", outputDir);
-    return invoke(args, cwd, env);
+    return invoke(args, cwd, env, subprocessTimeoutMs);
   }
 
   return { dir, pluginDir, cwdA, cwdB, config, calls, invoke, run };
@@ -168,6 +170,29 @@ test("独立 bundle 默认读取 plugin-config，不自动回退到旧配置目�
   assert.equal(JSON.parse(await readFile(oldConfig, "utf8")).apiKey, TEST_KEY);
 });
 
+test("CLI 仅将 GPT Image 2.5 官方模型发送到图片服务", async (t) => {
+  const f = await fixture(t);
+  const config = JSON.parse(await readFile(f.config, "utf8"));
+  for (const model of [
+    "gpt-image-2.5-flare",
+    "gpt-image-2.5-sunburst",
+    "gpt-image-2.5-flare-2026-09-08",
+    "gpt-image-2.5-sunburst-2026-09-08",
+  ]) {
+    await writeFile(f.config, JSON.stringify({ ...config, model }));
+    await success(await f.run("generate", { prompt: model }), path.join(f.cwdA, "generated-images"), 1, model);
+    assert.equal(JSON.parse(f.calls.at(-1).body).model, model);
+  }
+  const sent = f.calls.length;
+  for (const model of ["gpt-image-2", "fake-image-model"]) {
+    await writeFile(f.config, JSON.stringify({ ...config, model }));
+    const result = await f.run("generate", { prompt: "无效模型" });
+    failure(result);
+    assert.match(result.stderr, /model|GPT Image 2\.5/i);
+    assert.equal(f.calls.length, sent, "不支持的模型不得发起 HTTP 请求");
+  }
+});
+
 test("独立 bundle 在中文空格路径运行，两个项目分别使用自己的默认输出目录", async (t) => {
   const f = await fixture(t);
   assert.deepEqual(await readdir(f.pluginDir), ["image-gen.cjs"], "发布运行不需要源码、package.json 或 node_modules");
@@ -187,7 +212,7 @@ test("独立 bundle 在中文空格路径运行，两个项目分别使用自己
     assert.equal(call.url, "/v1/images/generations");
     assert.equal(call.method, "POST");
     assert.equal(call.headers.authorization, `Bearer ${TEST_KEY}`);
-    assert.deepEqual(JSON.parse(call.body), { model: "fake-image-model", prompt: COMPLEX_PROMPT, n: 1, output_format: "png" });
+    assert.deepEqual(JSON.parse(call.body), { model: TEST_MODEL, prompt: COMPLEX_PROMPT, n: 1, output_format: "png" });
   }
 });
 
@@ -199,8 +224,42 @@ test("显式输出目录、尺寸和多张请求被保留，图片文件互不�
   assert.equal(new Set(data.paths).size, 3);
   assert.equal(f.calls.length, 1);
   assert.deepEqual(JSON.parse(f.calls[0].body), {
-    model: "fake-image-model", prompt: "三只猫", n: 3, size: "1024x1024", output_format: "png",
+    model: TEST_MODEL, prompt: "三只猫", n: 3, size: "1024x1024", output_format: "png",
   });
+});
+
+test("GPT Image 2.5 有效尺寸原样发送给生成与编辑接口", async (t) => {
+  const f = await fixture(t);
+  for (const size of ["auto", "1024x640", "1536x512", "3840x2160"]) {
+    await success(await f.run("generate", { prompt: size, size }), path.join(f.cwdA, "generated-images"), 1, size);
+    assert.equal(JSON.parse(f.calls.at(-1).body).size, size);
+  }
+  const imagePath = path.join(f.cwdA, "参考图.png");
+  await writeFile(imagePath, PNG);
+  for (const size of ["auto", "2048x2048"]) {
+    await success(await f.run("edit", { prompt: size, imagePath, size }), path.join(f.cwdA, "generated-images"), 1, size);
+    const call = f.calls.at(-1);
+    const form = await new Response(call.body, { headers: { "content-type": call.headers["content-type"] } }).formData();
+    assert.equal(form.get("size"), size);
+  }
+});
+
+test("无效尺寸在生成和编辑请求发出前被拒绝", async (t) => {
+  const f = await fixture(t);
+  const imagePath = path.join(f.cwdA, "参考图.png");
+  await writeFile(imagePath, PNG);
+  for (const size of [
+    "1024X1024", // 格式错误
+    "1025x1024", // 边长不是 16 的倍数
+    "512x512", // 像素不足
+    "3840x2176", // 像素过多
+    "3856x2048", // 单边超过 3840
+    "3072x512", // 长短边比例超过 3
+  ]) {
+    failure(await f.run("generate", { prompt: "无效尺寸", size }));
+  }
+  failure(await f.run("edit", { prompt: "无效尺寸", imagePath, size: "512x512" }));
+  assert.equal(f.calls.length, 0, "尺寸校验失败时不得调用 HTTP 服务");
 });
 
 test("文生图固定请求 PNG，仅 transparent 为 true 时请求透明背景，并原样保存半透明 RGBA", async (t) => {
@@ -211,8 +270,8 @@ test("文生图固定请求 PNG，仅 transparent 为 true 时请求透明背景
   await success(await f.run("generate", { prompt: "透明图标", transparent: true }), outputDir, 1, "透明图标");
   await success(await f.run("generate", { prompt: "普通图标", transparent: false }), outputDir, 1, "普通图标");
   assert.deepEqual(f.calls.map((call) => JSON.parse(call.body)), [
-    { model: "fake-image-model", prompt: "透明图标", n: 1, background: "transparent", output_format: "png" },
-    { model: "fake-image-model", prompt: "普通图标", n: 1, output_format: "png" },
+    { model: TEST_MODEL, prompt: "透明图标", n: 1, background: "transparent", output_format: "png" },
+    { model: TEST_MODEL, prompt: "普通图标", n: 1, output_format: "png" },
   ]);
 });
 
@@ -252,27 +311,35 @@ test("Base64 和 URL 中的 HTML、普通文本、空内容均拒绝保存", asy
   assert.deepEqual(await readdir(path.join(f.cwdA, "generated-images")).catch(() => []), []);
 });
 
-test("25 MiB 边界同时适用于 Base64 与 URL，无长度头的超限流提前取消", async (t) => {
-  const limit = 25 * 1024 * 1024;
-  // 保留真实 PNG 开头并追加填充，验证大小边界，不依赖完整图片解码。
-  const paddedImage = Buffer.alloc(limit + 1);
-  PNG.copy(paddedImage);
+test("Base64 图片超过 64 MiB 时在解码前拒绝", async (t) => {
+  const f = await fixture(t);
+  const limit = 64 * 1024 * 1024;
+  assert.equal(MAX_IMAGE_BYTES, limit);
+  const bytes = limit + 1;
+  const padding = (3 - bytes % 3) % 3;
+  const encoded = "A".repeat(Math.ceil(bytes / 3) * 4 - padding) + "=".repeat(padding);
+  const outputDir = path.join(f.dir, "过大 Base64");
+  await assert.rejects(saveBase64Image(outputDir, encoded), /64 MiB/);
+  assert.deepEqual(await readdir(outputDir).catch(() => []), []);
+  assert.equal(f.calls.length, 0);
+});
+
+test("64 MiB URL 图片可保存，无长度头的超限流提前取消", async (t) => {
+  const limit = 64 * 1024 * 1024;
   const chunk = Buffer.alloc(64 * 1024);
   const firstChunk = Buffer.from(chunk);
   PNG.copy(firstChunk);
-  let current;
+  let currentSize;
   let transfer;
   const f = await fixture(t, (call, origin, res) => {
-    if (call.method === "POST") return json({ data: [current.transport === "base64"
-      ? { b64_json: paddedImage.subarray(0, current.size).toString("base64") }
-      : { url: `${origin}/large.png` }] });
+    if (call.method === "POST") return json({ data: [{ url: `${origin}/large.png` }] });
     const state = { sent: 0, cancelled: false };
     let closed;
     state.closed = new Promise((resolve) => { closed = resolve; });
     transfer = state;
     const stream = Readable.from((function* () {
-      for (let offset = 0; offset < current.size; offset += chunk.length) {
-        const part = (offset === 0 ? firstChunk : chunk).subarray(0, Math.min(chunk.length, current.size - offset));
+      for (let offset = 0; offset < currentSize; offset += chunk.length) {
+        const part = (offset === 0 ? firstChunk : chunk).subarray(0, Math.min(chunk.length, currentSize - offset));
         state.sent += part.length;
         yield part;
       }
@@ -286,29 +353,33 @@ test("25 MiB 边界同时适用于 Base64 与 URL，无长度头的超限流提�
     stream.pipe(res); // 不发送 Content-Length，依靠实际读取的字节数判断上限。
     return null;
   });
-  for (current of [
-    { transport: "base64", size: limit },
-    { transport: "base64", size: limit + 1 },
-    { transport: "url", size: limit },
-    { transport: "url", size: 64 * 1024 * 1024 },
-  ]) {
+  for (currentSize of [limit, limit * 2]) {
     const before = f.calls.length;
-    const prompt = `${current.transport} 大小边界`;
-    const result = await f.run("generate", { prompt });
-    if (current.size === limit) {
-      await success(result, path.join(f.cwdA, "generated-images"), 1, prompt, 1, { bytes: paddedImage.subarray(0, limit) });
+    const result = await f.run("generate", { prompt: "URL 大小边界" }, { subprocessTimeoutMs: 30000 });
+    if (currentSize === limit) {
+      assert.equal(result.code, 0, result.stderr);
+      const data = JSON.parse(result.stdout);
+      assert.equal(data.paths.length, 1);
+      const saved = data.paths[0];
+      assert.equal((await stat(saved)).size, limit);
+      const handle = await open(saved, "r");
+      try {
+        const header = Buffer.alloc(PNG.length);
+        await handle.read(header, 0, header.length, 0);
+        assert.deepEqual(header, PNG);
+      } finally {
+        await handle.close();
+      }
     } else {
       failure(result);
-      assert.match(result.stderr, /25 MiB/);
+      assert.match(result.stderr, /64 MiB/);
     }
-    assert.equal(f.calls.length - before, current.transport === "base64" ? 1 : 2);
-    if (current.transport === "url") {
-      await transfer.closed;
-      assert.equal(transfer.cancelled, current.size > limit);
-      if (current.size > limit) assert.ok(transfer.sent < current.size, "应在读完整个超限响应前断开下载");
-    }
+    assert.equal(f.calls.length - before, 2);
+    await transfer.closed;
+    assert.equal(transfer.cancelled, currentSize > limit);
+    if (currentSize > limit) assert.ok(transfer.sent < currentSize, "应在读完整个超限响应前断开下载");
   }
-  assert.equal((await readdir(path.join(f.cwdA, "generated-images"))).length, 2, "只有两个边界内结果应落盘");
+  assert.equal((await readdir(path.join(f.cwdA, "generated-images"))).length, 1, "超限结果不得落盘");
 });
 
 test("下载已收到响应头但响应体停顿时仍会超时，不保存或重试", async (t) => {
@@ -341,7 +412,7 @@ test("参考图通过 multipart 上传，保留复杂提示词且不修改原图
   const form = await new Response(call.body, { headers: { "content-type": call.headers["content-type"] } }).formData();
   // FormData 的线上编码按标准将换行转换为 CRLF；CLI 返回值仍保留原始提示词。
   assert.equal(form.get("prompt"), COMPLEX_PROMPT.replaceAll("\n", "\r\n"));
-  assert.equal(form.get("model"), "fake-image-model");
+  assert.equal(form.get("model"), TEST_MODEL);
   assert.equal(form.get("n"), "2");
   assert.equal(form.get("size"), "1024x1024");
   assert.equal(form.has("background"), false);
@@ -349,6 +420,33 @@ test("参考图通过 multipart 上传，保留复杂提示词且不修改原图
   assert.equal(form.get("image").name, path.basename(imagePath));
   assert.equal(form.get("image").type, "image/png");
   assert.deepEqual(Buffer.from(await form.get("image").arrayBuffer()), PNG);
+});
+
+test("参考图严格小于 50,000,000 字节，达到上限时在上传前拒绝", async (t) => {
+  const f = await fixture(t);
+  const limit = 50_000_000;
+  const imagePath = path.join(f.cwdA, "大参考图.png");
+  await writeFile(imagePath, PNG);
+  const handle = await open(imagePath, "r+");
+  try {
+    await handle.truncate(limit - 1);
+  } finally {
+    await handle.close();
+  }
+  await success(await f.run("edit", { prompt: "边界内参考图", imagePath }, { subprocessTimeoutMs: 30000 }), path.join(f.cwdA, "generated-images"), 1, "边界内参考图");
+  assert.equal(f.calls.length, 1);
+  assert.ok(f.calls[0].body.length > limit - 1, "上传应包含完整参考图及 multipart 头");
+
+  const sameFile = await open(imagePath, "r+");
+  try {
+    await sameFile.truncate(limit);
+  } finally {
+    await sameFile.close();
+  }
+  const result = await f.run("edit", { prompt: "超限参考图", imagePath });
+  failure(result);
+  assert.match(result.stderr, /50/);
+  assert.equal(f.calls.length, 1, "达到 50,000,000 字节时不得发起上传");
 });
 
 test("参考图编辑固定请求 PNG，仅 transparent 为 true 时请求透明背景，并原样保存半透明 RGBA", async (t) => {
